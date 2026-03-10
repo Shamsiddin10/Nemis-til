@@ -1,0 +1,36 @@
+{
+  "users": {
+    "7384088509": {
+      "name": "DEVELOPER💻",
+      "phone": "Admin",
+      "role": "admin"
+    },
+    "": {
+      "name": "Nasrullayev Shokirjon",
+      "phone": "+998990541426",
+      "role": "teacher"
+    }, 
+    "6120632807": {
+      "name": "Behruzbek",
+      "phone": "+998911735750",
+      "role": "student"
+    }
+  },
+  "teachers": {
+    "": {
+      "name": "Nasrullayev Shokirjon",
+      "phone": "+998990541426",
+      "students": [],
+      "tests": []
+    }
+  },
+  "students": {
+    "6120632807": {
+      "name": "Behruzbek",
+      "phone": "+998911735750",
+      "teacher_id": null
+    }
+  },
+  "tests": [],
+  "results": {}
+}
