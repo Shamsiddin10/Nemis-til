@@ -1,11 +1,25 @@
+import os
 import telebot
 from telebot import types
 import json
-import os
+from flask import Flask
+from threading import Thread
+from datetime import date
+
+# ==================== RENDER UCHUN SERVER ====================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running 24/7!"
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 # ==================== SOZLAMALAR ====================
-BOT_TOKEN = ("8721836937:AAEfOxXl64VA6DXBR_SYwtWywu8UMZeOwlQ" ) # @BotFather dan olgan tokeningiz
-ADMIN_IDS = [7384088509]  # O'z Telegram ID ingizni kiriting
+BOT_TOKEN = ("8721836937:AAEfOxXl64VA6DXBR_SYwtWywu8UMZeOwlQ")
+ADMIN_IDS = [7384088509]
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -791,8 +805,7 @@ def student_profile(message):
         parse_mode="HTML")
 
 # ==================== DAVOMAT ====================
-from datetime import date
-
+    
 def today():
     return str(date.today())
 
@@ -1236,5 +1249,11 @@ def unknown(message):
 
 # ==================== ISHGA TUSHIRISH ====================
 if __name__ == "__main__":
-    print("🤖 Bot ishga tushdi...")
-    bot.infinity_polling()
+    bot.remove_webhook()
+
+    t = Thread(target=run_server)
+    t.daemon = True
+    t.start()
+
+    print("🚀 Bot Render'da 24/7 rejimida ishga tushdi!")
+    bot.infinity_polling(skip_pending=True)
