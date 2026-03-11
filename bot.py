@@ -434,7 +434,7 @@ def admin_assign_do(call):
     if telegram_id:
         try:
             bot.send_message(int(telegram_id),
-                f"🎉 Siz <b>{teacher_name}</b> o'qituvchisiga biriktirildinggiz!",
+                f"🎉 <b>{student['name']}</b>, siz <b>{teacher_name}</b> o'qituvchisiga biriktirildiingiz!",
                 parse_mode="HTML")
         except:
             pass
