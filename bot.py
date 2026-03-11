@@ -18,7 +18,7 @@ def run_server():
     app.run(host="0.0.0.0", port=port)
 
 # ==================== SOZLAMALAR ====================
-BOT_TOKEN = ("8721836937:AAEfOxXl64VA6DXBR_SYwtWywu8UMZeOwlQ")
+BOT_TOKEN = "8721836937:AAEfOxXl64VA6DXBR_SYwtWywu8UMZeOwlQ"
 ADMIN_IDS = [7384088509]
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -64,7 +64,8 @@ def main_menu(user_id):
     if role == "admin":
         markup.add("👨‍🏫 O'qituvchilar", "👨‍🎓 O'quvchilar")
         markup.add("➕ O'quvchi qo'shish", "📊 Statistika")
-        markup.add("🗑 O'qituvchini o'chirish", "🗑 O'quvchini o'chirish")
+        markup.add("🔗 O'quvchini biriktirish", "🗑 O'qituvchini o'chirish")
+        markup.add("🗑 O'quvchini o'chirish")
     elif role == "teacher":
         markup.add("➕ O'quvchi qo'shish", "📝 Test qo'shish")
         markup.add("👨‍🎓 O'quvchilarim", "📋 Testlarim")
@@ -95,7 +96,7 @@ def start(message):
             reply_markup=main_menu(user_id))
         return
 
-    # Ro'yxatdan o'tgan foydalanuvchi
+    # Allaqachon ro'yxatdan o'tgan
     if uid in db["users"]:
         role = get_user_role(user_id)
         role_text = {"teacher": "O'qituvchi", "student": "O'quvchi"}.get(role, "Foydalanuvchi")
@@ -106,27 +107,34 @@ def start(message):
             reply_markup=main_menu(user_id))
         return
 
-    # Yangi foydalanuvchi - ism so'rash
-    user_states[user_id] = "waiting_name"
+    # Yangi foydalanuvchi — ism familya so'rash
+    user_states[user_id] = "waiting_fullname"
     bot.send_message(message.chat.id,
         "🇩🇪 <b>Nemis tili o'rgatuvchi botga xush kelibsiz!</b>\n\n"
-        "Ro'yxatdan o'tish uchun:\n"
-        "👤 Ismingizni kiriting:",
+        "✍️ Ism va Familyangizni kiriting:\n"
+        "<i>Masalan: Ali Valiyev</i>",
         parse_mode="HTML",
         reply_markup=types.ReplyKeyboardRemove())
 
 # ==================== RO'YXATDAN O'TISH ====================
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "waiting_name")
-def get_name(message):
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "waiting_fullname")
+def get_fullname(message):
     user_id = message.from_user.id
-    user_data[user_id] = {"name": message.text.strip()}
+    full_name = message.text.strip()
+    if len(full_name.split()) < 2:
+        bot.send_message(message.chat.id,
+            "⚠️ Iltimos <b>Ism va Familyangizni</b> to'liq kiriting!\n"
+            "<i>Masalan: Ali Valiyev</i>",
+            parse_mode="HTML")
+        return
+    user_data[user_id] = {"name": full_name}
     user_states[user_id] = "waiting_phone"
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("📱 Raqamni yuborish", request_contact=True))
     bot.send_message(message.chat.id,
-        f"✅ Ism saqlandi: <b>{message.text.strip()}</b>\n\n"
-        "📱 Telefon raqamingizni yuboring:",
+        f"✅ Ism: <b>{full_name}</b>\n\n"
+        "📱 Telefon raqamingizni yuboring yoki qo'lda kiriting:",
         parse_mode="HTML",
         reply_markup=markup)
 
@@ -135,68 +143,90 @@ def get_name(message):
 def get_contact(message):
     user_id = message.from_user.id
     phone = message.contact.phone_number
-    user_data[user_id]["phone"] = phone
-    user_states[user_id] = "choosing_role"
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("👨‍🎓 O'quvchi", "👨‍🏫 O'qituvchi")
-    bot.send_message(message.chat.id,
-        f"✅ Raqam saqlandi: <b>{phone}</b>\n\n"
-        "🎭 Rolingizni tanlang:",
-        parse_mode="HTML",
-        reply_markup=markup)
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    process_phone_login(message, phone)
 
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "waiting_phone" and m.content_type == "text")
 def get_phone_text(message):
-    user_id = message.from_user.id
     phone = message.text.strip()
-    user_data[user_id]["phone"] = phone
-    user_states[user_id] = "choosing_role"
+    process_phone_login(message, phone)
 
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("👨‍🎓 O'quvchi", "👨‍🏫 O'qituvchi")
-    bot.send_message(message.chat.id,
-        f"✅ Raqam saqlandi: <b>{phone}</b>\n\n"
-        "🎭 Rolingizni tanlang:",
-        parse_mode="HTML",
-        reply_markup=markup)
-
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "choosing_role")
-def choose_role(message):
+def process_phone_login(message, phone):
     user_id = message.from_user.id
     uid = str(user_id)
     db = load_db()
+    full_name = user_data[user_id]["name"]
 
-    name = user_data[user_id]["name"]
-    phone = user_data[user_id]["phone"]
+    # Raqam bo'yicha o'quvchi yoki o'qituvchini qidirish
+    found_role = None
+    found_id = None
 
-    if message.text == "👨‍🎓 O'quvchi":
-        db["users"][uid] = {"name": name, "phone": phone, "role": "student"}
-        db["students"][uid] = {"name": name, "phone": phone, "teacher_id": None}
+    for sid, s in db["students"].items():
+        s_phone = s.get("phone", "").replace(" ", "").replace("-", "")
+        in_phone = phone.replace(" ", "").replace("-", "")
+        if s_phone == in_phone or s_phone == in_phone.lstrip("+") or "+" + s_phone == in_phone:
+            found_role = "student"
+            found_id = sid
+            break
+
+    if not found_role:
+        for tid, t in db["teachers"].items():
+            t_phone = t.get("phone", "").replace(" ", "").replace("-", "")
+            in_phone = phone.replace(" ", "").replace("-", "")
+            if t_phone == in_phone or t_phone == in_phone.lstrip("+") or "+" + t_phone == in_phone:
+                found_role = "teacher"
+                found_id = tid
+                break
+
+    if found_role == "student":
+        # O'quvchi topildi — Telegram ID biriktir
+        db["students"][found_id]["telegram_id"] = uid
+        db["students"][found_id]["name"] = full_name
+        db["users"][uid] = {"name": full_name, "phone": phone, "role": "student"}
+        # Agar eski ID bilan saqlangan bo'lsa, o'qituvchi ro'yxatini yangilash
+        teacher_id = db["students"][found_id].get("teacher_id")
+        if teacher_id and teacher_id in db["teachers"]:
+            if found_id not in db["teachers"][teacher_id]["students"]:
+                db["teachers"][teacher_id]["students"].append(found_id)
         save_db(db)
         del user_states[user_id]
+        if user_id in user_data:
+            del user_data[user_id]
+        teacher_name = db["teachers"].get(teacher_id, {}).get("name", "Biriktirilmagan") if teacher_id else "Biriktirilmagan"
         bot.send_message(message.chat.id,
-            f"🎉 Ro'yxatdan muvaffaqiyatli o'tdingiz!\n\n"
-            f"👤 Ism: <b>{name}</b>\n"
-            f"📱 Raqam: <b>{phone}</b>\n"
-            f"🎭 Rol: <b>O'quvchi</b>",
+            f"🎉 <b>Xush kelibsiz, {full_name}!</b>\n\n"
+            f"✅ Hisobingiz topildi!\n"
+            f"🎭 Rol: <b>O'quvchi</b>\n"
+            f"👨‍🏫 O'qituvchi: <b>{teacher_name}</b>",
             parse_mode="HTML",
             reply_markup=main_menu(user_id))
 
-    elif message.text == "👨‍🏫 O'qituvchi":
-        db["users"][uid] = {"name": name, "phone": phone, "role": "teacher"}
-        db["teachers"][uid] = {"name": name, "phone": phone, "students": [], "tests": []}
+    elif found_role == "teacher":
+        # O'qituvchi topildi
+        db["teachers"][found_id]["telegram_id"] = uid
+        db["teachers"][found_id]["name"] = full_name
+        db["users"][uid] = {"name": full_name, "phone": phone, "role": "teacher"}
         save_db(db)
         del user_states[user_id]
+        if user_id in user_data:
+            del user_data[user_id]
         bot.send_message(message.chat.id,
-            f"🎉 Ro'yxatdan muvaffaqiyatli o'tdingiz!\n\n"
-            f"👤 Ism: <b>{name}</b>\n"
-            f"📱 Raqam: <b>{phone}</b>\n"
+            f"🎉 <b>Xush kelibsiz, {full_name}!</b>\n\n"
+            f"✅ Hisobingiz topildi!\n"
             f"🎭 Rol: <b>O'qituvchi</b>",
             parse_mode="HTML",
             reply_markup=main_menu(user_id))
+
     else:
-        bot.send_message(message.chat.id, "❗ Iltimos, tugmalardan birini tanlang.")
+        # Raqam bazada yo'q
+        bot.send_message(message.chat.id,
+            f"❌ <b>Kechirasiz, {full_name}!</b>\n\n"
+            f"📱 <b>{phone}</b> raqami bazada topilmadi.\n\n"
+            "O'qituvchingiz yoki admindan ro'yxatga kiritishini so'rang.",
+            parse_mode="HTML",
+            reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("🔄 Qayta urinish"))
+        user_states[user_id] = "waiting_phone"
 
 # ==================== ADMIN PANEL ====================
 @bot.message_handler(func=lambda m: m.text == "📊 Statistika" and m.from_user.id in ADMIN_IDS)
@@ -312,7 +342,104 @@ def admin_assign_teacher(call):
         call.message.chat.id, call.message.message_id, parse_mode="HTML")
     bot.send_message(call.message.chat.id, "Bosh menyu:", reply_markup=main_menu(uid))
 
-# ==================== O'QITUVCHINI O'CHIRISH ====================
+# ==================== O'QUVCHINI O'QITUVCHIGA BIRIKTIRISH ====================
+@bot.message_handler(func=lambda m: m.text == "🔗 O'quvchini biriktirish" and m.from_user.id in ADMIN_IDS)
+def admin_assign_start(message):
+    db = load_db()
+    if not db["students"]:
+        bot.send_message(message.chat.id, "📭 Hali o'quvchilar yo'q.")
+        return
+    if not db["teachers"]:
+        bot.send_message(message.chat.id, "📭 Hali o'qituvchilar yo'q.")
+        return
+
+    markup = types.InlineKeyboardMarkup()
+    for sid, s in db["students"].items():
+        tid = s.get("teacher_id")
+        teacher_name = db["teachers"].get(tid, {}).get("name", "Biriktirilmagan") if tid else "Biriktirilmagan"
+        markup.add(types.InlineKeyboardButton(
+            f"👨‍🎓 {s['name']} | 👨‍🏫 {teacher_name}",
+            callback_data=f"assign_pick_student_{sid}"
+        ))
+    bot.send_message(message.chat.id,
+        "👨‍🎓 <b>Qaysi o'quvchini biriktirmoqchisiz?</b>\n\n"
+        "<i>Hozirgi o'qituvchisi ham ko'rsatilgan</i>",
+        parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("assign_pick_student_"))
+def admin_assign_pick_student(call):
+    sid = call.data.replace("assign_pick_student_", "")
+    db = load_db()
+    student = db["students"].get(sid)
+    if not student:
+        bot.answer_callback_query(call.id, "O'quvchi topilmadi!")
+        return
+
+    markup = types.InlineKeyboardMarkup()
+    for tid, t in db["teachers"].items():
+        is_current = student.get("teacher_id") == tid
+        label = f"{'✅ ' if is_current else ''}👨‍🏫 {t['name']} | {t['phone']}"
+        markup.add(types.InlineKeyboardButton(label, callback_data=f"assign_do_{sid}_{tid}"))
+    markup.add(types.InlineKeyboardButton("❌ Biriktirishni bekor qilish", callback_data=f"assign_do_{sid}_none"))
+
+    bot.edit_message_text(
+        f"👨‍🎓 O'quvchi: <b>{student['name']}</b>\n\n"
+        f"👨‍🏫 Qaysi o'qituvchiga biriktirasiz?",
+        call.message.chat.id, call.message.message_id,
+        parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("assign_do_"))
+def admin_assign_do(call):
+    parts = call.data.split("_")
+    sid = parts[2]
+    new_tid = parts[3]
+    db = load_db()
+    student = db["students"].get(sid)
+    if not student:
+        bot.answer_callback_query(call.id, "Topilmadi!")
+        return
+
+    old_tid = student.get("teacher_id")
+
+    # Eski o'qituvchidan o'chirish
+    if old_tid and old_tid in db["teachers"]:
+        if sid in db["teachers"][old_tid]["students"]:
+            db["teachers"][old_tid]["students"].remove(sid)
+
+    if new_tid == "none":
+        db["students"][sid]["teacher_id"] = None
+        save_db(db)
+        bot.edit_message_text(
+            f"✅ <b>{student['name']}</b> hech qaysi o'qituvchiga biriktirilmadi.",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML")
+        return
+
+    # Yangi o'qituvchiga biriktirish
+    if new_tid not in db["teachers"]:
+        bot.answer_callback_query(call.id, "O'qituvchi topilmadi!")
+        return
+
+    db["students"][sid]["teacher_id"] = new_tid
+    if sid not in db["teachers"][new_tid]["students"]:
+        db["teachers"][new_tid]["students"].append(sid)
+    save_db(db)
+
+    teacher_name = db["teachers"][new_tid]["name"]
+    bot.edit_message_text(
+        f"✅ <b>{student['name']}</b> → <b>{teacher_name}</b> ga biriktirildi!",
+        call.message.chat.id, call.message.message_id, parse_mode="HTML")
+
+    # O'quvchiga xabar
+    telegram_id = student.get("telegram_id")
+    if telegram_id:
+        try:
+            bot.send_message(int(telegram_id),
+                f"🎉 Siz <b>{teacher_name}</b> o'qituvchisiga biriktirildinggiz!",
+                parse_mode="HTML")
+        except:
+            pass
+
+
 @bot.message_handler(func=lambda m: m.text == "🗑 O'qituvchini o'chirish" and m.from_user.id in ADMIN_IDS)
 def admin_delete_teacher_list(message):
     db = load_db()
@@ -823,7 +950,7 @@ def student_profile(message):
         parse_mode="HTML")
 
 # ==================== DAVOMAT ====================
-    
+
 def today():
     return str(date.today())
 
