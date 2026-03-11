@@ -488,43 +488,61 @@ def admin_add_teacher_id(message):
 # ==================== O'QITUVCHI PANEL ====================
 @bot.message_handler(func=lambda m: m.text == "➕ O'quvchi qo'shish" and get_user_role(m.from_user.id) == "teacher")
 def teacher_add_student(message):
-    user_states[message.from_user.id] = "teacher_add_student_id"
+    user_states[message.from_user.id] = "teacher_add_student_name"
+    user_data[message.from_user.id] = {}
     bot.send_message(message.chat.id,
-        "👨‍🎓 O'quvchi qo'shish uchun uning <b>Telegram ID</b>sini kiriting:",
+        "👨‍🎓 <b>Yangi o'quvchi qo'shish</b>\n\n"
+        "👤 O'quvchining ismini kiriting:",
         parse_mode="HTML",
         reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("🔙 Orqaga"))
 
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "teacher_add_student_id")
-def teacher_add_student_id(message):
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "teacher_add_student_name")
+def teacher_add_student_name(message):
     if message.text == "🔙 Orqaga":
         del user_states[message.from_user.id]
         bot.send_message(message.chat.id, "🔙 Orqaga.", reply_markup=main_menu(message.from_user.id))
         return
-    try:
-        student_id = str(int(message.text.strip()))
-        db = load_db()
-        teacher_id = str(message.from_user.id)
-        if student_id not in db["students"]:
-            bot.send_message(message.chat.id, "❌ Bu ID bilan o'quvchi topilmadi. Avval botga /start bosishi kerak.")
-        elif student_id in db["teachers"][teacher_id]["students"]:
-            bot.send_message(message.chat.id, "⚠️ Bu o'quvchi allaqachon sizning ro'yxatingizda!")
-        else:
-            db["teachers"][teacher_id]["students"].append(student_id)
-            db["students"][student_id]["teacher_id"] = teacher_id
-            save_db(db)
-            bot.send_message(message.chat.id,
-                f"✅ <b>{db['students'][student_id]['name']}</b> o'quvchi sifatida qo'shildi!",
-                parse_mode="HTML")
-            try:
-                bot.send_message(int(student_id),
-                    f"🎉 Siz <b>{db['teachers'][teacher_id]['name']}</b> o'qituvchisining o'quvchisi sifatida qo'shildingiz!",
-                    parse_mode="HTML")
-            except:
-                pass
+    user_data[message.from_user.id]["name"] = message.text.strip()
+    user_states[message.from_user.id] = "teacher_add_student_phone"
+    bot.send_message(message.chat.id,
+        f"✅ Ism: <b>{message.text.strip()}</b>\n\n"
+        "📱 Telefon raqamini kiriting:",
+        parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "teacher_add_student_phone")
+def teacher_add_student_phone(message):
+    if message.text == "🔙 Orqaga":
         del user_states[message.from_user.id]
-        bot.send_message(message.chat.id, "Bosh menyu:", reply_markup=main_menu(message.from_user.id))
-    except:
-        bot.send_message(message.chat.id, "❌ Noto'g'ri ID. Faqat raqam kiriting.")
+        bot.send_message(message.chat.id, "🔙 Orqaga.", reply_markup=main_menu(message.from_user.id))
+        return
+    uid = message.from_user.id
+    tid = str(uid)
+    db = load_db()
+    name = user_data[uid]["name"]
+    phone = message.text.strip()
+
+    # Yangi o'quvchi ID yaratish
+    new_sid = f"t{tid}_s{len(db['students'])+1}"
+    db["students"][new_sid] = {
+        "name": name,
+        "phone": phone,
+        "teacher_id": tid
+    }
+    db["users"][new_sid] = {"name": name, "phone": phone, "role": "student"}
+    db["teachers"][tid]["students"].append(new_sid)
+    save_db(db)
+
+    del user_states[uid]
+    if uid in user_data:
+        del user_data[uid]
+
+    bot.send_message(message.chat.id,
+        f"✅ <b>{name}</b> o'quvchi sifatida qo'shildi!\n"
+        f"📱 Tel: <b>{phone}</b>\n\n"
+        f"⚠️ Eslatma: O'quvchi botga /start bosib ro'yxatdan o'tsa, "
+        f"uning hisobi avtomatik biriktiriladi.",
+        parse_mode="HTML",
+        reply_markup=main_menu(uid))
 
 @bot.message_handler(func=lambda m: m.text == "👨‍🎓 O'quvchilarim" and get_user_role(m.from_user.id) == "teacher")
 def teacher_my_students(message):
