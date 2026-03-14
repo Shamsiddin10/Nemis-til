@@ -944,7 +944,7 @@ def student_came_btn(message):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("att_came_") or c.data.startswith("att_absent_"))
 def student_attendance_inline(call):
-    parts = call.data.split("_")
+    parts = call.data.split("_", 3)
     action = parts[1]
     tid = parts[2]
     d = parts[3]
@@ -1005,7 +1005,7 @@ def student_write_reason(message):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("att_confirm_") or c.data.startswith("att_reject_"))
 def teacher_confirm_attendance(call):
-    parts = call.data.split("_")
+    parts = call.data.split("_", 3)
     action = parts[1]
     sid = parts[2]
     d = parts[3]
