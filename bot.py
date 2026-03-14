@@ -933,8 +933,8 @@ def student_came_btn(message):
     t_tg = db["teachers"].get(tid, {}).get("telegram_id") or tid
     markup = types.InlineKeyboardMarkup()
     markup.add(
-        types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"att_confirm_{sid}_{d}"),
-        types.InlineKeyboardButton("❌ Rad etish", callback_data=f"att_reject_{sid}_{d}"))
+        types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"att_confirm|{sid}|{d}"),
+        types.InlineKeyboardButton("❌ Rad etish", callback_data=f"att_reject|{sid}|{d}"))
     try:
         bot.send_message(int(t_tg),
             f"📍 <b>{s_name}</b> \"Keldim\" dedi!\n📆 {d}\n\nTasdiqlaysizmi?",
@@ -967,8 +967,8 @@ def student_attendance_inline(call):
         t_tg = db["teachers"].get(tid, {}).get("telegram_id") or tid
         markup = types.InlineKeyboardMarkup()
         markup.add(
-            types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"att_confirm_{sid}_{d}"),
-            types.InlineKeyboardButton("❌ Rad etish", callback_data=f"att_reject_{sid}_{d}"))
+            types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"att_confirm|{sid}|{d}"),
+            types.InlineKeyboardButton("❌ Rad etish", callback_data=f"att_reject|{sid}|{d}"))
         try:
             bot.send_message(int(t_tg),
                 f"📍 <b>{s_name}</b> \"Keldim\" dedi!\n📆 {d}\n\nTasdiqlaysizmi?",
@@ -1003,12 +1003,12 @@ def student_write_reason(message):
     except:
         pass
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("att_confirm_") or c.data.startswith("att_reject_"))
+@bot.callback_query_handler(func=lambda c: c.data.startswith("att_confirm|") or c.data.startswith("att_reject|"))
 def teacher_confirm_attendance(call):
-    parts = call.data.split("_", 3)
-    action = parts[1]
-    sid = parts[2]
-    d = parts[3]
+    parts = call.data.split("|")
+    action = parts[0].split("_")[1]  # "confirm" yoki "reject"
+    sid = parts[1]
+    d = parts[2]
     real_id, _ = get_real_id(call.from_user.id)
     tid = real_id or str(call.from_user.id)
     db = load_db()
