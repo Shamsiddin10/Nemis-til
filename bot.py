@@ -6,6 +6,8 @@ from flask import Flask
 from threading import Thread
 from datetime import date
 import time
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ==================== RENDER UCHUN SERVER ====================
 app = Flask(__name__)
@@ -20,17 +22,48 @@ def run_server():
 
 # ==================== SOZLAMALAR ====================
 BOT_TOKEN = ("8721836937:AAGBJzt0_AKXf2Dl7zP68n6I3qV_VA82GvM")
-ADMIN_IDS = [7384088509]
+ADMIN_IDS = []
+
+# Neon PostgreSQL connection string
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_vDgOKI0rE1uk@ep-billowing-fog-am9lf3w6-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==================== DATABASE ====================
-DB_FILE = "database.json"
+
+def get_conn():
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+def init_db():
+    """Jadvallarni yaratish (agar mavjud bo'lmasa)"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS db_store (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def load_db():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+    """Ma'lumotlarni Neon dan yuklash"""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM db_store WHERE key = 'main'")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return json.loads(row["value"])
+    except Exception as e:
+        print(f"load_db error: {e}")
     return {
         "users": {},
         "teachers": {},
@@ -42,8 +75,20 @@ def load_db():
     }
 
 def save_db(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Ma'lumotlarni Neon ga saqlash"""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO db_store (key, value)
+            VALUES ('main', %s)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """, (json.dumps(data, ensure_ascii=False),))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"save_db error: {e}")
 
 def today():
     return str(date.today())
@@ -302,7 +347,6 @@ def admin_add_teacher_phone(message):
     name = user_data[uid]["name"]
     db = load_db()
 
-    # Telefon raqami allaqachon bormi?
     for tid, t in db["teachers"].items():
         existing = t.get("phone","").replace(" ","").replace("-","").lstrip("+")
         new_p = phone.replace(" ","").replace("-","").lstrip("+")
@@ -313,12 +357,7 @@ def admin_add_teacher_phone(message):
             return
 
     new_id = f"teacher_{len(db['teachers'])+1}"
-    db["teachers"][new_id] = {
-        "name": name,
-        "phone": phone,
-        "students": [],
-        "tests": []
-    }
+    db["teachers"][new_id] = {"name": name, "phone": phone, "students": [], "tests": []}
     db["users"][new_id] = {"name": name, "phone": phone, "role": "teacher"}
     save_db(db)
     del user_states[uid]
@@ -326,8 +365,7 @@ def admin_add_teacher_phone(message):
         del user_data[uid]
     bot.send_message(message.chat.id,
         f"✅ <b>O'qituvchi muvaffaqiyatli qo'shildi!</b>\n\n"
-        f"👤 Ism familya: <b>{name}</b>\n"
-        f"📱 Telefon: <b>{phone}</b>\n\n"
+        f"👤 Ism familya: <b>{name}</b>\n📱 Telefon: <b>{phone}</b>\n\n"
         f"ℹ️ O'qituvchi /start bosib, ushbu raqam bilan ro'yxatdan o'tishi kerak.",
         parse_mode="HTML", reply_markup=main_menu(uid))
 
@@ -369,64 +407,56 @@ def admin_add_student_phone(message):
         db["users"][new_id] = {"name": name, "phone": phone, "role": "student"}
         save_db(db)
         del user_states[uid]
+        if uid in user_data:
+            del user_data[uid]
         bot.send_message(message.chat.id,
-            f"✅ <b>{name}</b> qo'shildi!\n📱 {phone}\n⚠️ O'qituvchi yo'q, keyinroq biriktiring.",
+            f"✅ <b>{name}</b> qo'shildi!\n📱 Tel: <b>{phone}</b>",
             parse_mode="HTML", reply_markup=main_menu(uid))
         return
-    user_data[uid]["phone"] = phone
-    user_states[uid] = "admin_add_student_teacher"
     markup = types.InlineKeyboardMarkup()
     for tid, t in db["teachers"].items():
-        markup.add(types.InlineKeyboardButton(f"👨‍🏫 {t['name']}", callback_data=f"asgn_t_{tid}"))
-    markup.add(types.InlineKeyboardButton("➖ O'qituvchisiz qo'shish", callback_data="asgn_t_none"))
+        markup.add(types.InlineKeyboardButton(f"👨‍🏫 {t['name']}", callback_data=f"assign_new_{name}|{phone}|{tid}"))
+    markup.add(types.InlineKeyboardButton("➕ Biriktirmasdan qo'shish", callback_data=f"assign_new_{name}|{phone}|none"))
     bot.send_message(message.chat.id,
-        f"✅ Tel: <b>{phone}</b>\n\n👨‍🏫 O'qituvchini tanlang:",
+        f"👨‍🎓 <b>{name}</b> qaysi o'qituvchiga biriktirilsin?",
         parse_mode="HTML", reply_markup=markup)
+    del user_states[uid]
+    if uid in user_data:
+        del user_data[uid]
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("asgn_t_") and user_states.get(c.from_user.id) == "admin_add_student_teacher")
-def admin_assign_teacher_new(call):
-    uid = call.from_user.id
+@bot.callback_query_handler(func=lambda c: c.data.startswith("assign_new_"))
+def assign_new_student(call):
+    parts = call.data.replace("assign_new_", "").split("|")
+    name, phone, tid = parts[0], parts[1], parts[2]
     db = load_db()
-    name = user_data[uid]["name"]
-    phone = user_data[uid]["phone"]
-    tid = call.data.replace("asgn_t_", "")
-    teacher_id = None if tid == "none" else tid
     new_id = f"adm_{len(db['students'])+1}"
+    teacher_id = None if tid == "none" else tid
     db["students"][new_id] = {"name": name, "phone": phone, "teacher_id": teacher_id}
     db["users"][new_id] = {"name": name, "phone": phone, "role": "student"}
     if teacher_id and teacher_id in db["teachers"]:
         db["teachers"][teacher_id]["students"].append(new_id)
     save_db(db)
-    teacher_name = db["teachers"][teacher_id]["name"] if teacher_id else "Biriktirilmagan"
-    del user_states[uid]
+    teacher_name = db["teachers"].get(teacher_id, {}).get("name", "Biriktirilmagan") if teacher_id else "Biriktirilmagan"
     bot.edit_message_text(
-        f"✅ <b>{name}</b> muvaffaqiyatli qo'shildi!\n📱 {phone}\n👨‍🏫 O'qituvchi: {teacher_name}",
+        f"✅ <b>{name}</b> qo'shildi!\n📱 {phone}\n👨‍🏫 {teacher_name}",
         call.message.chat.id, call.message.message_id, parse_mode="HTML")
-    bot.send_message(call.message.chat.id, "Bosh menyu:", reply_markup=main_menu(uid))
 
-# --- O'quvchini o'qituvchiga biriktirish ---
+# ==================== ADMIN: O'QUVCHINI BIRIKTIRISH ====================
 @bot.message_handler(func=lambda m: m.text == "🔗 O'quvchini biriktirish" and m.from_user.id in ADMIN_IDS)
-def admin_assign_start(message):
+def admin_assign_student(message):
     db = load_db()
     if not db["students"]:
         bot.send_message(message.chat.id, "📭 Hali o'quvchilar yo'q.")
         return
-    if not db["teachers"]:
-        bot.send_message(message.chat.id, "📭 Hali o'qituvchilar yo'q.")
-        return
     markup = types.InlineKeyboardMarkup()
     for sid, s in db["students"].items():
-        tid = s.get("teacher_id")
-        teacher_name = db["teachers"].get(tid,{}).get("name","Biriktirilmagan") if tid else "Biriktirilmagan"
-        markup.add(types.InlineKeyboardButton(
-            f"👨‍🎓 {s['name']} | 👨‍🏫 {teacher_name}", callback_data=f"apick_s_{sid}"))
-    bot.send_message(message.chat.id,
-        "👨‍🎓 <b>Qaysi o'quvchini biriktirmoqchisiz?</b>",
+        markup.add(types.InlineKeyboardButton(f"👨‍🎓 {s['name']} | {s['phone']}", callback_data=f"asgn_{sid}"))
+    bot.send_message(message.chat.id, "👨‍🎓 <b>Qaysi o'quvchini biriktirasiz?</b>",
         parse_mode="HTML", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("apick_s_"))
-def admin_assign_pick_student(call):
-    sid = call.data.replace("apick_s_", "")
+@bot.callback_query_handler(func=lambda c: c.data.startswith("asgn_"))
+def admin_assign_select_teacher(call):
+    sid = call.data.replace("asgn_", "")
     db = load_db()
     student = db["students"].get(sid)
     if not student:
@@ -489,8 +519,7 @@ def admin_delete_teacher_list(message):
     markup = types.InlineKeyboardMarkup()
     for tid, t in db["teachers"].items():
         markup.add(types.InlineKeyboardButton(f"🗑 {t['name']} | {t['phone']}", callback_data=f"del_t_{tid}"))
-    bot.send_message(message.chat.id,
-        "👨‍🏫 <b>Qaysi o'qituvchini o'chirmoqchisiz?</b>",
+    bot.send_message(message.chat.id, "👨‍🏫 <b>Qaysi o'qituvchini o'chirmoqchisiz?</b>",
         parse_mode="HTML", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("del_t_"))
@@ -1281,6 +1310,10 @@ def unknown(message):
 
 # ==================== ISHGA TUSHIRISH ====================
 if __name__ == "__main__":
+    print("🔧 Database jadval yaratilmoqda...")
+    init_db()
+    print("✅ Database tayyor!")
+
     try:
         bot.remove_webhook()
         bot.close()
